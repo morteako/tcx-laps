@@ -242,6 +242,11 @@
             <DistanceMeters>0</DistanceMeters>
             <Cadence>53</Cadence>
             <SensorState>Present</SensorState>
+            <Extensions>
+              <ns3:TPX>
+                <ns3:Watts>180</ns3:Watts>
+              </ns3:TPX>
+            </Extensions>
           </Trackpoint>
         </Track>
       </Lap>

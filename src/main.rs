@@ -1,117 +1,132 @@
-use chrono::{DateTime, TimeZone, Utc};
-use serde::de::{self, Deserializer};
-use serde_derive::Deserialize;
+use chrono::{DateTime, Duration, Utc};
+use parse::{Lap, Trackpoint, TrainingCenterDatabase};
 use serde_xml_rs::from_reader;
 use std::fs::File;
 
-use serde::Deserialize;
+mod parse;
 
-#[derive(Debug, Deserialize)]
-struct TrainingCenterDatabase {
-    #[serde(rename = "Activities")]
-    activities: Activities,
+fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
+    let laps: Vec<Lap> = d
+        .activities
+        .activity
+        .into_iter()
+        .flat_map(|a| a.lap)
+        .collect();
+    let q: Vec<Vec<parse::Trackpoint>> = laps
+        .into_iter()
+        .map(|l| {
+            l.track
+                .into_iter()
+                .flat_map(|t| t.trackpoints)
+                .collect::<Vec<Trackpoint>>()
+        })
+        .collect();
+    let qq: Vec<DataLap> = q
+        .into_iter()
+        .map(|v| DataLap {
+            hr_data: v.clone().into_iter().filter_map(to_hr_data).collect(),
+            watt_data: v.into_iter().filter_map(to_watt_data).collect(),
+        })
+        .collect();
+
+    qq
 }
 
-#[derive(Debug, Deserialize)]
-struct Activities {
-    #[serde(rename = "Activity")]
-    activity: Vec<Activity>,
+struct DataLap {
+    hr_data: Vec<Data>,
+    watt_data: Vec<Data>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Activity {
-    #[serde(rename = "Lap")]
-    lap: Vec<Lap>,
+struct Data {
+    ts: DateTime<Utc>,
+    val: u16,
 }
 
-#[derive(Debug, Deserialize)]
-struct Lap {
-    #[serde(rename = "Track")]
-    track: Vec<Track>,
+fn to_hr_data(t: Trackpoint) -> Option<Data> {
+    t.time
+        .zip(t.heart_rate_bpm)
+        .map(|w| Data { ts: w.0, val: w.1 })
 }
 
-#[derive(Debug, Deserialize)]
-struct Track {
-    #[serde(rename = "Trackpoint")]
-    trackpoints: Vec<Trackpoint>,
+fn to_watt_data(t: Trackpoint) -> Option<Data> {
+    t.time.zip(t.extensions).map(|w| Data {
+        ts: w.0,
+        val: w.1.tpx.watts,
+    })
 }
 
-#[derive(Debug, Deserialize)]
-struct Trackpoint {
-    #[serde(rename = "Time", deserialize_with = "deserialize_datetime_opt")]
-    time: Option<DateTime<Utc>>,
+// TODO max duration
+// TODO excel format
+// TODO CMD LINE ARGS?
 
-    #[serde(rename = "HeartRateBpm", deserialize_with = "deserialize_hr_opt")]
-    heart_rate_bpm: Option<u16>,
+#[derive(Debug)]
+struct TimeInfo {
+    total_time: Duration,
+    avg_hr: f64,
+    max_hr: u16,
+    avg_watt: f64,
 }
 
-fn deserialize_datetime_opt<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: Option<String> = Option::deserialize(deserializer)?;
-    if let Some(str) = s {
-        Utc.datetime_from_str(&str, "%Y-%m-%dT%H:%M:%S%.fZ")
-            .map(Some)
-            .map_err(de::Error::custom)
-    } else {
-        Ok(None)
+struct Avg {
+    total_time: Duration,
+    avg: f64,
+}
+
+fn get_avg(v: &Vec<Data>) -> Avg {
+    let mut total_time_weighted_avg: f64 = 0.0;
+    let mut total_time: f64 = 0.0;
+    for window in v.windows(2) {
+        let p1 = &window[0];
+        let p2 = &window[1];
+        let duration = (p2.ts - p1.ts).num_milliseconds() as f64;
+        total_time += duration;
+        let cur_avg = (p1.val + p2.val) as f64 / 2.0; // Average HR between two points
+        total_time_weighted_avg += cur_avg * duration;
+    }
+    Avg {
+        total_time: Duration::milliseconds(total_time as i64),
+        avg: total_time_weighted_avg / total_time,
     }
 }
 
-fn deserialize_hr_opt<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    struct HeartRateBpm {
-        #[serde(rename = "Value")]
-        value: String,
-    }
+fn calculate_weighted_average_hr(trackpoints: &DataLap) -> TimeInfo {
+    let max_hr = trackpoints.hr_data.iter().map(|h| h.val).max().unwrap();
+    let watt_avg = get_avg(&trackpoints.watt_data);
+    let hr_avg = get_avg(&trackpoints.hr_data);
 
-    let hr_bpm: Option<HeartRateBpm> = Option::deserialize(deserializer)?;
-    hr_bpm
-        .map(|hr| hr.value.parse::<u16>().map_err(de::Error::custom))
-        .transpose()
+    TimeInfo {
+        avg_hr: hr_avg.avg,
+        total_time: hr_avg.total_time,
+        max_hr: max_hr,
+        avg_watt: watt_avg.avg,
+    }
 }
 
-fn calculate_weighted_average_hr(trackpoints: &Vec<Trackpoint>) -> Option<f64> {
-    let mut total_time_weighted_hr = 0.0;
-    let mut total_time = 0.0;
+fn format_time_info(timeinfo: TimeInfo) -> String {
+    let time = format!(
+        "{:02}:{:02}",
+        timeinfo.total_time.num_minutes(),
+        (timeinfo.total_time.num_seconds()) % 60
+    );
 
-    for window in trackpoints.windows(2) {
-        // dbg!(window);
-        if let (Some(tp1), Some(tp2)) = (window[0].time, window[1].time) {
-            if let (Some(hr1), Some(hr2)) = (window[0].heart_rate_bpm, window[1].heart_rate_bpm) {
-                let duration = (tp2 - tp1).num_milliseconds() as f64;
-                let avg_hr = (hr1 + hr2) as f64 / 2.0; // Average HR between two points
-                                                       // dbg!(duration);
-                                                       // dbg!(avg_hr);
-                total_time_weighted_hr += avg_hr * duration;
-                total_time += duration;
-            }
-        }
-    }
-    // dbg!(total_time);
-    if total_time > 0.0 {
-        Some(total_time_weighted_hr / total_time)
-    } else {
-        None
-    }
+    let avg_hr = format!("{:.0}", timeinfo.avg_hr);
+    let avg_watt = format!("{:.0}", timeinfo.avg_watt);
+    let max_hr = format!("{:.0}", timeinfo.max_hr);
+
+    format!("{}\t{}\t{}\t{}", time, avg_watt, avg_hr, max_hr)
 }
 
 fn main() {
-    let file = File::open("ex-small.tcx").expect("Unable to open file");
+    let file = File::open("ex-big.tcx").expect("Unable to open file");
     let tcx: TrainingCenterDatabase = from_reader(file).expect("Unable to parse XML");
-    for act in tcx.activities.activity {
-        for lap in act.lap {
-            for t in lap.track {
-                // dbg!(&t.trackpoints);
-                let q = calculate_weighted_average_hr(&t.trackpoints);
-                // dbg!(q);
-                println!("Avg : {:?}", q)
-            }
-        }
+
+    let all_data = to_data_vec(tcx);
+    println!("Lap\tmm:ss\tavgW\tavgHR\tmaxHR");
+    for (li, lap) in all_data.into_iter().enumerate() {
+        // dbg!(&t.trackpoints);
+        let q = calculate_weighted_average_hr(&lap);
+
+        println!("{:>2}\t{}", li + 1, format_time_info(q));
     }
     // println!("{:#?}", tcx);
 }
