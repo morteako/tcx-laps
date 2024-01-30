@@ -1,7 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use parse::{Lap, Trackpoint, TrainingCenterDatabase};
-use serde_xml_rs::from_reader;
-use std::{fs::File, ops::Add};
+use std::{fs::File, io::BufReader, ops::Add};
 
 mod parse;
 
@@ -12,15 +11,13 @@ fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
         .into_iter()
         .flat_map(|a| a.lap)
         .collect();
-    let trackpoints: Vec<Vec<parse::Trackpoint>> = laps
-        .into_iter()
-        .map(|l| {
-            l.track
-                .into_iter()
-                .flat_map(|t| t.trackpoints)
-                .collect::<Vec<Trackpoint>>()
-        })
-        .collect();
+    let trackpoints = laps.into_iter().map(|l| {
+        l.track
+            .into_iter()
+            .flat_map(|t| t.trackpoints)
+            .collect::<Vec<Trackpoint>>()
+    });
+
     let datalaps: Vec<DataLap> = trackpoints
         .into_iter()
         .map(|v| DataLap {
@@ -131,7 +128,8 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let file = File::open(args.file).expect("Unable to open file");
-    let tcx: TrainingCenterDatabase = from_reader(file).expect("Unable to parse XML");
+    let tcx: TrainingCenterDatabase =
+        quick_xml::de::from_reader(BufReader::new(file)).expect("Unable to parse XML");
 
     let all_data = to_data_vec(tcx);
     println!("Lap\tmm:ss\tavgW\tavgHR\tmaxHR");
