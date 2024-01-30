@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use parse::{Lap, Trackpoint, TrainingCenterDatabase};
 use serde_xml_rs::from_reader;
-use std::fs::File;
+use std::{fs::File, ops::Add};
 
 mod parse;
 
@@ -116,13 +116,34 @@ fn format_time_info(timeinfo: TimeInfo) -> String {
     format!("{}\t{}\t{}\t{}", time, avg_watt, avg_hr, max_hr)
 }
 
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Name of the person to greet
+    #[arg(short, long)]
+    file: String,
+
+    /// Number of times to greet
+    #[arg(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    laps: Vec<usize>,
+}
+
 fn main() {
-    let file = File::open("ex-big.tcx").expect("Unable to open file");
+    let args = Args::parse();
+    // dbg!(args.laps);
+    let file = File::open(args.file).expect("Unable to open file");
     let tcx: TrainingCenterDatabase = from_reader(file).expect("Unable to parse XML");
 
     let all_data = to_data_vec(tcx);
     println!("Lap\tmm:ss\tavgW\tavgHR\tmaxHR");
-    for (li, lap) in all_data.into_iter().enumerate() {
+    for (li, lap) in all_data
+        .into_iter()
+        .enumerate()
+        .filter(|a| args.laps.contains(&a.0.add(1)))
+    {
         // dbg!(&t.trackpoints);
         let q = calculate_weighted_average_hr(&lap);
 
