@@ -1,16 +1,12 @@
 use chrono::{DateTime, Duration, Utc};
-use parse::{Lap, Trackpoint, TrainingCenterDatabase};
+use parse::{Trackpoint, TrainingCenterDatabase};
 use std::{fs::File, io::BufReader, ops::Add};
 
 mod parse;
 
-fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
-    let laps: Vec<Lap> = d
-        .activities
-        .activity
-        .into_iter()
-        .flat_map(|a| a.lap)
-        .collect();
+fn to_data_vec(d: TrainingCenterDatabase) -> impl Iterator<Item = DataLap> {
+    let laps = d.activities.activity.into_iter().flat_map(|a| a.lap);
+
     let trackpoints = laps.into_iter().map(|l| {
         l.track
             .into_iter()
@@ -18,13 +14,10 @@ fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
             .collect::<Vec<Trackpoint>>()
     });
 
-    let datalaps: Vec<DataLap> = trackpoints
-        .into_iter()
-        .map(|v| DataLap {
-            hr_data: v.clone().into_iter().filter_map(to_hr_data).collect(),
-            watt_data: v.into_iter().filter_map(to_watt_data).collect(),
-        })
-        .collect();
+    let datalaps = trackpoints.map(|v| DataLap {
+        hr_data: v.clone().into_iter().filter_map(to_hr_data).collect(),
+        watt_data: v.into_iter().filter_map(to_watt_data).collect(),
+    });
 
     datalaps
 }
@@ -121,7 +114,7 @@ struct Args {
     #[arg(short, long)]
     file: String,
 
-    #[arg(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    #[arg(short, long, value_parser, num_args = 1.., value_delimiter = ' ', default_values_t=Vec::<usize>::new())]
     laps: Vec<usize>,
 }
 
@@ -136,7 +129,7 @@ fn main() {
     for (li, lap) in all_data
         .into_iter()
         .enumerate()
-        .filter(|a| args.laps.contains(&a.0.add(1)))
+        .filter(|a| args.laps.is_empty() || args.laps.contains(&a.0.add(1)))
     {
         // dbg!(&t.trackpoints);
         let time_info = calculate_weighted_average_hr(&lap);
