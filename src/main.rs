@@ -12,7 +12,7 @@ fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
         .into_iter()
         .flat_map(|a| a.lap)
         .collect();
-    let q: Vec<Vec<parse::Trackpoint>> = laps
+    let trackpoints: Vec<Vec<parse::Trackpoint>> = laps
         .into_iter()
         .map(|l| {
             l.track
@@ -21,7 +21,7 @@ fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
                 .collect::<Vec<Trackpoint>>()
         })
         .collect();
-    let qq: Vec<DataLap> = q
+    let datalaps: Vec<DataLap> = trackpoints
         .into_iter()
         .map(|v| DataLap {
             hr_data: v.clone().into_iter().filter_map(to_hr_data).collect(),
@@ -29,7 +29,7 @@ fn to_data_vec(d: TrainingCenterDatabase) -> Vec<DataLap> {
         })
         .collect();
 
-    qq
+    datalaps
 }
 
 struct DataLap {
@@ -118,22 +118,18 @@ fn format_time_info(timeinfo: TimeInfo) -> String {
 
 use clap::Parser;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
     #[arg(short, long)]
     file: String,
 
-    /// Number of times to greet
     #[arg(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
     laps: Vec<usize>,
 }
 
 fn main() {
     let args = Args::parse();
-    // dbg!(args.laps);
     let file = File::open(args.file).expect("Unable to open file");
     let tcx: TrainingCenterDatabase = from_reader(file).expect("Unable to parse XML");
 
@@ -145,9 +141,8 @@ fn main() {
         .filter(|a| args.laps.contains(&a.0.add(1)))
     {
         // dbg!(&t.trackpoints);
-        let q = calculate_weighted_average_hr(&lap);
+        let time_info = calculate_weighted_average_hr(&lap);
 
-        println!("{:>2}\t{}", li + 1, format_time_info(q));
+        println!("{:>2}\t{}", li + 1, format_time_info(time_info));
     }
-    // println!("{:#?}", tcx);
 }

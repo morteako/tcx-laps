@@ -40,14 +40,7 @@ pub struct Trackpoint {
     #[serde(rename = "HeartRateBpm", deserialize_with = "deserialize_hr_opt")]
     pub heart_rate_bpm: Option<u16>,
 
-    // #[serde(
-    //     default,
-    //     rename = "Extensions",
-    //     deserialize_with = "deserialize_watt_opt"
-    // )]
-    // watts: Option<u16>,
     #[serde(rename = "Extensions")]
-    // #[serde(default)] // This tells Serde that the field is optional
     pub extensions: Option<Extensions>,
 }
 
